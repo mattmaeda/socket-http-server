@@ -1,7 +1,21 @@
+import os
+import re
 import socket
 import sys
 
-def response_ok(body=b"This is a minimal response", mimetype=b"text/plain"):
+MY_PATH = os.path.dirname(os.path.abspath(__file__))
+WEBROOT = os.path.join(MY_PATH, "webroot")
+BUFF_SIZE = 1024
+
+def response(response_code, body, mimetype):
+    return b"\r\n".join([
+        b"HTTP/1.1 " + response_code,
+        b"Content-Type: " + mimetype,
+        b"",
+        body
+    ])
+
+def response_ok(body=b"This is a minimal response", mimetype=b"text/html"):
     """
     returns a basic HTTP response
     Ex:
@@ -16,22 +30,33 @@ def response_ok(body=b"This is a minimal response", mimetype=b"text/plain"):
         <html><h1>Welcome:</h1></html>\r\n
         '''
     """
-    pass
+    return response(b"200 OK", body, mimetype)
 
 
 def parse_request(request):
-    pass
+    (method, uri, version) =  request.split("\r\n")[0].split(" ")
+
+    if method != "GET":
+        return response_method_not_allowed()
+    # Take care of trailing slash
+    if len(uri) > 1 and uri.endswith("/"):
+        uri = "".join(uri[0:-1])
+
+    return uri
 
 
 def response_method_not_allowed():
     """Returns a 405 Method Not Allowed response"""
-    pass
+    return response(b"405 Method Not Allowed",
+                    b"<html><h1>Method Not Allowed</h1></html>",
+                    b"text/html")
 
 
-def response_not_found():
+def response_not_found(message):
     """Returns a 404 Not Found response"""
-    pass
-    
+    return response(b"404", b"<html><h1>" + message + b"</h1></html>",
+                    b"text/html")
+
 
 def resolve_uri(uri):
     """
@@ -60,15 +85,41 @@ def resolve_uri(uri):
         resolve_uri('/a_page_that_doesnt_exist.html') -> Raises a NameError
 
     """
+    print("Processing uri '{}'".format(uri))
+    content = b""
+    mime_type = b"text/html"
 
-    # TODO: Raise a NameError if the requested content is not present
-    # under webroot.
+    if uri == "/":
+        content += b"<html><h1>" + WEBROOT.encode() + b"</h1><ul>"
+        lineitem = "<li><a href=\"/{}\">{}</a></li>"
 
-    # TODO: Fill in the appropriate content and mime_type give the URI.
-    # See the assignment guidelines for help on "mapping mime-types", though
-    # you might need to create a special case for handling make_time.py
-    content = b"not implemented"
-    mime_type = b"not implemented"
+        for filename in os.listdir(WEBROOT):
+            content += lineitem.format(filename, filename).encode()
+
+        content += b"</html>"
+
+    elif uri == "/images":
+        content += (b"<html><h1>" + os.path.join(WEBROOT, "images").encode() +
+                    b"</h1><ul>")
+        lineitem = "<li><a href=\"/images/{}\">{}</a></li>"
+
+        for filename in os.listdir(os.path.join(WEBROOT, "images")):
+            content += lineitem.format(filename, filename).encode()
+
+        content += b"</ul><a href=\"/\">Home</a></html>"
+
+    elif os.path.exists(os.path.join(WEBROOT, "".join(uri[1:]))):
+        if "images" in uri:
+            mime_type = b"image/" + uri.split(".")[-1].encode()
+        elif not uri.endswith("html"):
+            mime_type = b"text/plain"
+
+        with open(os.path.join(WEBROOT, "".join(uri[1:])), "rb") as webfile:
+            content = bytearray(webfile.read())
+
+
+    else:
+        raise NameError("Path '{}' not found".format(uri))
 
     return content, mime_type
 
@@ -85,18 +136,34 @@ def server(log_buffer=sys.stderr):
         while True:
             print('waiting for a connection', file=log_buffer)
             conn, addr = sock.accept()  # blocking
+            request = ""
             try:
                 print('connection - {0}:{1}'.format(*addr), file=log_buffer)
                 while True:
-                    data = conn.recv(16)
-                    print('received "{0}"'.format(data), file=log_buffer)
-                    if data:
-                        print('sending data back to client', file=log_buffer)
-                        conn.sendall(data)
-                    else:
-                        msg = 'no more data from {0}:{1}'.format(*addr)
-                        print(msg, log_buffer)
+                    data = conn.recv(BUFF_SIZE)
+                    request += data.decode('utf8')
+
+                    if len(data) < BUFF_SIZE:
                         break
+
+                # Fulfill request
+                uri = parse_request(request)
+
+                if isinstance(uri, str):
+                    (content, mimetype) = resolve_uri(uri)
+                    response = response_ok(body=content, mimetype=mimetype)
+                else:
+                    # Kind of a hack.  This means method not allowed
+                    response = uri
+
+                conn.sendall(response)
+
+            except NameError as ne:
+                conn.sendall(response_not_found(str(ne).encode()))
+
+            except ValueError as ne:
+                conn.sendall(response_method_not_allowed())
+
             finally:
                 conn.close()
 
@@ -108,5 +175,3 @@ def server(log_buffer=sys.stderr):
 if __name__ == '__main__':
     server()
     sys.exit(0)
-
-

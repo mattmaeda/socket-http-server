@@ -95,15 +95,15 @@ class ResponseMethodNotAllowedTestCase(unittest.TestCase):
 class ParseRequestTestCase(unittest.TestCase):
     """unit tests for the parse_request method"""
 
-    def call_function_under_test(self, request):
+    def call_function_under_test(self, request="GET / HTTP/1.1\r\n"):
         """call the `parse_request` function"""
         from http_server import parse_request
         return parse_request(request)
 
     def test_get_method(self):
         """verify that GET HTTP requests do not raise an error"""
-        request = "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n"
         try:
+            request = "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n"
             self.call_function_under_test(request)
         except (NotImplementedError, Exception) as e:
             self.fail('GET method raises an error {0}'.format(str(e)))
@@ -114,9 +114,13 @@ class ParseRequestTestCase(unittest.TestCase):
         request_template = "{0} / HTTP/1.1\r\nHost: example.com\r\n\r\n"
         for method in methods:
             request = request_template.format(method)
-            self.assertRaises(
-                NotImplementedError, self.call_function_under_test, request
-            )
+            resp = self.call_function_under_test(request)
+            expected = "405 Method Not Allowed"
+            actual = extract_response_code(resp)
+            self.assertEqual(expected.encode('utf8'), actual)
+#            self.assertRaises(
+#                NotImplementedError, self.call_function_under_test, request
+#            )
 
 
 class HTTPServerFunctionalTestCase(unittest.TestCase):
